@@ -27,11 +27,22 @@ func main() {
 	parts := strings.Split(string(req), "\r\n")
 
 	requestLineParts := strings.Split(parts[0], " ")
-	if requestLineParts[1] != "/" {
+	if requestLineParts[1] == "/" {
+		conn.Write([]byte("HTTP/1.1 200 OK\r\n\r\n"))
+		conn.Close()
+	} else if strings.HasPrefix(requestLineParts[1], "/echo") {
+		uriParts := strings.Split(requestLineParts[1], "/")
+		if len(uriParts) > 3 {
+			conn.Write([]byte("HTTP/1.1 404 Not Found\r\n\r\n"))
+			conn.Close()
+		}
+		content := uriParts[2]
+		contentLength := len(uriParts[2])
+		conn.Write([]byte(fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", contentLength, content)))
+		conn.Close()
+	} else {
 		conn.Write([]byte("HTTP/1.1 404 Not Found\r\n\r\n"))
 		conn.Close()
 	}
 
-	conn.Write([]byte("HTTP/1.1 200 OK\r\n\r\n"))
-	conn.Close()
 }
