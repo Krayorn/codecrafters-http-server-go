@@ -45,8 +45,26 @@ func StatusText(code int) string {
 	return ""
 }
 
-func (response HTTPResponse) Write() []byte {
+func (response HTTPResponse) Write(request HTTPRequest) []byte {
 	str := fmt.Sprintf("HTTP/1.1 %d %s\r\n", response.Code, StatusText(response.Code))
+
+	if encodingsStr, ok := request.Headers["Accept-Encoding"]; ok {
+		encodings := strings.Split(encodingsStr, ", ")
+		for _, encoding := range encodings {
+			if encoding == "gzip" {
+				var encodedContent bytes.Buffer
+				gz := gzip.NewWriter(&encodedContent)
+				if _, err := gz.Write(response.Body); err != nil {
+					log.Fatal(err)
+				}
+				gz.Close()
+
+				response.Headers["Content-Encoding"] = encoding
+				response.Body = encodedContent.Bytes()
+				break
+			}
+		}
+	}
 
 	for header, value := range response.Headers {
 		str += fmt.Sprintf("%s: %s\r\n", header, value)
@@ -131,35 +149,10 @@ func listenReq(conn net.Conn) {
 		if len(uriParts) <= 3 {
 			content := uriParts[2]
 
-			foundEncoding := false
-			if encodingsStr, ok := request.Headers["Accept-Encoding"]; ok {
-				encodings := strings.Split(encodingsStr, ", ")
-				for _, encoding := range encodings {
-					if encoding == "gzip" {
-						var encodedContent bytes.Buffer
-						gz := gzip.NewWriter(&encodedContent)
-						if _, err := gz.Write([]byte(content)); err != nil {
-							log.Fatal(err)
-						}
-						gz.Close()
-
-						response = HTTPResponse{
-							Code:    StatusOK,
-							Headers: map[string]string{"Content-Type": "text/plain", "Content-Encoding": encoding},
-							Body:    encodedContent.Bytes(),
-						}
-
-						foundEncoding = true
-						break
-					}
-				}
-			}
-			if !foundEncoding {
-				response = HTTPResponse{
-					Code:    StatusOK,
-					Headers: map[string]string{"Content-Type": "text/plain"},
-					Body:    []byte(content),
-				}
+			response = HTTPResponse{
+				Code:    StatusOK,
+				Headers: map[string]string{"Content-Type": "text/plain"},
+				Body:    []byte(content),
 			}
 		}
 	} else if strings.HasPrefix(request.Url, "/user-agent") {
@@ -196,5 +189,5 @@ func listenReq(conn net.Conn) {
 		}
 	}
 
-	conn.Write(response.Write())
+	conn.Write(response.Write(request))
 }
