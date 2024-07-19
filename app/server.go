@@ -10,7 +10,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"unicode/utf8"
 )
 
 type HTTPRequest struct {
@@ -20,11 +19,57 @@ type HTTPRequest struct {
 	Body    []byte
 }
 
+type HTTPResponse struct {
+	Headers map[string]string
+	Code    int
+	Body    []byte
+}
+
+const (
+	StatusOK      = 200
+	StatusCreated = 201
+
+	StatusNotFound = 404
+)
+
+func StatusText(code int) string {
+	switch code {
+	case StatusOK:
+		return "OK"
+	case StatusCreated:
+		return "Created"
+	case StatusNotFound:
+		return "Not Found"
+	}
+
+	return ""
+}
+
+func (response HTTPResponse) Write() []byte {
+	str := fmt.Sprintf("HTTP/1.1 %d %s\r\n", response.Code, StatusText(response.Code))
+
+	for header, value := range response.Headers {
+		str += fmt.Sprintf("%s: %s\r\n", header, value)
+	}
+
+	if len(response.Body) > 0 {
+		str += fmt.Sprintf("Content-Length: %d\r\n", len(response.Body))
+	}
+
+	str += "\r\n"
+
+	if len(response.Body) > 0 {
+		str += string(response.Body)
+	}
+
+	return []byte(str)
+}
+
 var tempDirectory string
 
 func main() {
 	fmt.Println("Logs from your program will appear here!")
-
+	// take inspiration from http.ReadRequest // readLine()
 	if len(os.Args) > 2 {
 		tempDirectory = os.Args[2]
 	}
@@ -74,63 +119,82 @@ func listenReq(conn net.Conn) {
 		Body:    []byte(parts[1][:contentLength]),
 	}
 
+	response := HTTPResponse{
+		Code: StatusNotFound,
+	}
 	if request.Url == "/" {
-		conn.Write([]byte("HTTP/1.1 200 OK\r\n\r\n"))
+		response = HTTPResponse{
+			Code: StatusOK,
+		}
 	} else if strings.HasPrefix(request.Url, "/echo") {
 		uriParts := strings.Split(request.Url, "/")
-		if len(uriParts) > 3 {
-			conn.Write([]byte("HTTP/1.1 404 Not Found\r\n\r\n"))
-			return
-		}
-		content := uriParts[2]
+		if len(uriParts) <= 3 {
+			content := uriParts[2]
 
-		if encodingsStr, ok := request.Headers["Accept-Encoding"]; ok {
-			encodings := strings.Split(encodingsStr, ", ")
-			for _, encoding := range encodings {
-				if encoding == "gzip" {
-					var b bytes.Buffer
-					gz := gzip.NewWriter(&b)
-					if _, err := gz.Write([]byte(content)); err != nil {
-						log.Fatal(err)
+			foundEncoding := false
+			if encodingsStr, ok := request.Headers["Accept-Encoding"]; ok {
+				encodings := strings.Split(encodingsStr, ", ")
+				for _, encoding := range encodings {
+					if encoding == "gzip" {
+						var encodedContent bytes.Buffer
+						gz := gzip.NewWriter(&encodedContent)
+						if _, err := gz.Write([]byte(content)); err != nil {
+							log.Fatal(err)
+						}
+						gz.Close()
+
+						response = HTTPResponse{
+							Code:    StatusOK,
+							Headers: map[string]string{"Content-Type": "text/plain", "Content-Encoding": encoding},
+							Body:    encodedContent.Bytes(),
+						}
+
+						foundEncoding = true
+						break
 					}
-					gz.Close()
-					contentLength := len(b.String())
-					conn.Write([]byte(fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\nContent-Encoding: %s\r\n\r\n%s", contentLength, encoding, b.String())))
-					return
+				}
+			}
+			if !foundEncoding {
+				response = HTTPResponse{
+					Code:    StatusOK,
+					Headers: map[string]string{"Content-Type": "text/plain"},
+					Body:    []byte(content),
 				}
 			}
 		}
-
-		contentLength := utf8.RuneCountInString(content)
-		conn.Write([]byte(fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", contentLength, content)))
-
 	} else if strings.HasPrefix(request.Url, "/user-agent") {
 		content := request.Headers["User-Agent"]
-		contentLength := utf8.RuneCountInString(content)
-		conn.Write([]byte(fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", contentLength, content)))
+		response = HTTPResponse{
+			Code:    StatusOK,
+			Headers: map[string]string{"Content-Type": "text/plain"},
+			Body:    []byte(content),
+		}
 	} else if strings.HasPrefix(request.Url, "/files") {
 		uriParts := strings.Split(request.Url, "/")
-		if len(uriParts) > 3 {
-			conn.Write([]byte("HTTP/1.1 404 Not Found\r\n\r\n"))
-			return
-		}
+		if len(uriParts) <= 3 {
+			path := uriParts[2]
 
-		path := uriParts[2]
-
-		if request.Method == "GET" {
-			if _, err := os.Stat(fmt.Sprintf("/%s/%s", tempDirectory, path)); errors.Is(err, os.ErrNotExist) {
-				conn.Write([]byte("HTTP/1.1 404 Not Found\r\n\r\n"))
-				return
+			if request.Method == "GET" {
+				if _, err := os.Stat(fmt.Sprintf("/%s/%s", tempDirectory, path)); errors.Is(err, os.ErrNotExist) {
+					response = HTTPResponse{
+						Code: StatusNotFound,
+					}
+				} else {
+					content, _ := os.ReadFile(fmt.Sprintf("/%s/%s", tempDirectory, path))
+					response = HTTPResponse{
+						Code:    StatusOK,
+						Headers: map[string]string{"Content-Type": "application/octet-stream"},
+						Body:    []byte(content),
+					}
+				}
+			} else if request.Method == "POST" {
+				os.WriteFile(fmt.Sprintf("/%s/%s", tempDirectory, path), request.Body, 0666)
+				response = HTTPResponse{
+					Code: StatusCreated,
+				}
 			}
-
-			content, _ := os.ReadFile(fmt.Sprintf("/%s/%s", tempDirectory, path))
-			contentLength := utf8.RuneCountInString(string(content))
-			conn.Write([]byte(fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: %d\r\n\r\n%s", contentLength, content)))
-		} else if request.Method == "POST" {
-			os.WriteFile(fmt.Sprintf("/%s/%s", tempDirectory, path), request.Body, 0666)
-			conn.Write([]byte("HTTP/1.1 201 Created\r\n\r\n"))
 		}
-	} else {
-		conn.Write([]byte("HTTP/1.1 404 Not Found\r\n\r\n"))
 	}
+
+	conn.Write(response.Write())
 }
