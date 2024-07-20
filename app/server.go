@@ -14,9 +14,14 @@ import (
 
 type HTTPRequest struct {
 	Headers map[string]string
-	Url     string
+	Url     URL
 	Method  string
 	Body    []byte
+}
+
+type URL struct {
+	Original   string
+	Parameters map[string]string
 }
 
 type HTTPResponse struct {
@@ -85,6 +90,12 @@ func (response HTTPResponse) Write(request HTTPRequest) []byte {
 
 var tempDirectory string
 
+type Route struct {
+	Callback func(HTTPRequest) HTTPResponse
+	Method   string
+	Path     string
+}
+
 func main() {
 	fmt.Println("Logs from your program will appear here!")
 	// take inspiration from http.ReadRequest // readLine()
@@ -98,6 +109,38 @@ func main() {
 		os.Exit(1)
 	}
 
+	routes := make([]Route, 0)
+
+	routes = append(routes, Route{
+		Callback: home,
+		Method:   "GET",
+		Path:     "/",
+	})
+
+	routes = append(routes, Route{
+		Callback: echo,
+		Method:   "GET",
+		Path:     "/echo/{str}",
+	})
+
+	routes = append(routes, Route{
+		Callback: userAgent,
+		Method:   "GET",
+		Path:     "/user-agent",
+	})
+
+	routes = append(routes, Route{
+		Callback: getFile,
+		Method:   "GET",
+		Path:     "/files/{filename}",
+	})
+
+	routes = append(routes, Route{
+		Callback: createFile,
+		Method:   "POST",
+		Path:     "/files/{filename}",
+	})
+
 	for {
 		conn, err := l.Accept()
 		if err != nil {
@@ -105,12 +148,64 @@ func main() {
 			os.Exit(1)
 		}
 
-		go listenReq(conn)
+		go listenReq(conn, routes)
 	}
 
 }
 
-func listenReq(conn net.Conn) {
+func home(_ HTTPRequest) HTTPResponse {
+	return HTTPResponse{
+		Code: StatusOK,
+	}
+}
+
+func echo(request HTTPRequest) HTTPResponse {
+	content := request.Url.Parameters["str"]
+
+	return HTTPResponse{
+		Code:    StatusOK,
+		Headers: map[string]string{"Content-Type": "text/plain"},
+		Body:    []byte(content),
+	}
+}
+
+func userAgent(request HTTPRequest) HTTPResponse {
+	content := request.Headers["User-Agent"]
+
+	return HTTPResponse{
+		Code:    StatusOK,
+		Headers: map[string]string{"Content-Type": "text/plain"},
+		Body:    []byte(content),
+	}
+}
+
+func createFile(request HTTPRequest) HTTPResponse {
+	path := request.Url.Parameters["filename"]
+
+	os.WriteFile(fmt.Sprintf("/%s/%s", tempDirectory, path), request.Body, 0666)
+	return HTTPResponse{
+		Code: StatusCreated,
+	}
+}
+
+func getFile(request HTTPRequest) HTTPResponse {
+	path := request.Url.Parameters["filename"]
+
+	if _, err := os.Stat(fmt.Sprintf("/%s/%s", tempDirectory, path)); errors.Is(err, os.ErrNotExist) {
+		return HTTPResponse{
+			Code: StatusNotFound,
+		}
+	}
+
+	content, _ := os.ReadFile(fmt.Sprintf("/%s/%s", tempDirectory, path))
+	return HTTPResponse{
+		Code:    StatusOK,
+		Headers: map[string]string{"Content-Type": "application/octet-stream"},
+		Body:    []byte(content),
+	}
+}
+
+func listenReq(conn net.Conn, routes []Route) {
 	rawReq := make([]byte, 4096)
 	conn.Read(rawReq)
 
@@ -131,62 +226,48 @@ func listenReq(conn net.Conn) {
 	contentLength, _ := strconv.Atoi(headers["Content-Length"])
 
 	request := HTTPRequest{
-		Url:     requestLineParts[1],
+		Url: URL{
+			Original: requestLineParts[1],
+		},
 		Headers: headers,
 		Method:  requestLineParts[0],
 		Body:    []byte(parts[1][:contentLength]),
 	}
+	uriParts := strings.Split(requestLineParts[1], "/")
+
+ROUTELOOP:
+	for _, route := range routes {
+		if requestLineParts[0] != route.Method {
+			continue
+		}
+
+		routeParts := strings.Split(route.Path, "/")
+
+		parameters := make(map[string]string)
+		if len(routeParts) != len(uriParts) {
+			continue
+		}
+
+		for i := 0; i < len(routeParts); i++ {
+			if strings.HasPrefix(routeParts[i], "{") && strings.HasSuffix(routeParts[i], "}") {
+				parameters[routeParts[i][1:len(routeParts[i])-1]] = uriParts[i]
+				continue
+			}
+
+			if routeParts[i] == uriParts[i] {
+				continue
+			}
+
+			continue ROUTELOOP
+		}
+
+		request.Url.Parameters = parameters
+		conn.Write(route.Callback(request).Write(request))
+		return
+	}
 
 	response := HTTPResponse{
 		Code: StatusNotFound,
-	}
-	if request.Url == "/" {
-		response = HTTPResponse{
-			Code: StatusOK,
-		}
-	} else if strings.HasPrefix(request.Url, "/echo") {
-		uriParts := strings.Split(request.Url, "/")
-		if len(uriParts) <= 3 {
-			content := uriParts[2]
-
-			response = HTTPResponse{
-				Code:    StatusOK,
-				Headers: map[string]string{"Content-Type": "text/plain"},
-				Body:    []byte(content),
-			}
-		}
-	} else if strings.HasPrefix(request.Url, "/user-agent") {
-		content := request.Headers["User-Agent"]
-		response = HTTPResponse{
-			Code:    StatusOK,
-			Headers: map[string]string{"Content-Type": "text/plain"},
-			Body:    []byte(content),
-		}
-	} else if strings.HasPrefix(request.Url, "/files") {
-		uriParts := strings.Split(request.Url, "/")
-		if len(uriParts) <= 3 {
-			path := uriParts[2]
-
-			if request.Method == "GET" {
-				if _, err := os.Stat(fmt.Sprintf("/%s/%s", tempDirectory, path)); errors.Is(err, os.ErrNotExist) {
-					response = HTTPResponse{
-						Code: StatusNotFound,
-					}
-				} else {
-					content, _ := os.ReadFile(fmt.Sprintf("/%s/%s", tempDirectory, path))
-					response = HTTPResponse{
-						Code:    StatusOK,
-						Headers: map[string]string{"Content-Type": "application/octet-stream"},
-						Body:    []byte(content),
-					}
-				}
-			} else if request.Method == "POST" {
-				os.WriteFile(fmt.Sprintf("/%s/%s", tempDirectory, path), request.Body, 0666)
-				response = HTTPResponse{
-					Code: StatusCreated,
-				}
-			}
-		}
 	}
 
 	conn.Write(response.Write(request))
