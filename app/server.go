@@ -24,12 +24,6 @@ type URL struct {
 	Parameters map[string]string
 }
 
-type HTTPResponse struct {
-	Headers map[string]string
-	Code    int
-	Body    []byte
-}
-
 const (
 	StatusOK      = 200
 	StatusCreated = 201
@@ -48,6 +42,12 @@ func StatusText(code int) string {
 	}
 
 	return ""
+}
+
+type HTTPResponse struct {
+	Headers map[string]string
+	Code    int
+	Body    []byte
 }
 
 func (response HTTPResponse) Write(request HTTPRequest) []byte {
@@ -88,8 +88,6 @@ func (response HTTPResponse) Write(request HTTPRequest) []byte {
 	return []byte(str)
 }
 
-var tempDirectory string
-
 type Route struct {
 	Callback func(HTTPRequest) HTTPResponse
 	Method   string
@@ -104,9 +102,80 @@ func addRoute(routes *[]Route, path string, callback func(HTTPRequest) HTTPRespo
 	})
 }
 
+func listenReq(conn net.Conn, routes []Route) {
+	rawReq := make([]byte, 4096)
+	conn.Read(rawReq)
+
+	defer conn.Close()
+
+	parts := strings.Split(string(rawReq), "\r\n\r\n")
+	metaParts := strings.Split(parts[0], "\r\n")
+	requestLineParts := strings.Split(metaParts[0], " ")
+
+	headers := make(map[string]string)
+	for i := 1; i < len(metaParts); i++ {
+		headerParts := strings.Split(metaParts[i], ": ")
+		if len(headerParts) >= 2 {
+			headers[headerParts[0]] = strings.Join(headerParts[1:], "")
+		}
+	}
+
+	contentLength, _ := strconv.Atoi(headers["Content-Length"])
+
+	request := HTTPRequest{
+		Url: URL{
+			Original: requestLineParts[1],
+		},
+		Headers: headers,
+		Method:  requestLineParts[0],
+		Body:    []byte(parts[1][:contentLength]),
+	}
+	uriParts := strings.Split(requestLineParts[1], "/")
+
+ROUTELOOP:
+	for _, route := range routes {
+		if requestLineParts[0] != route.Method {
+			continue
+		}
+
+		routeParts := strings.Split(route.Path, "/")
+
+		parameters := make(map[string]string)
+		if len(routeParts) != len(uriParts) {
+			continue
+		}
+
+		for i := 0; i < len(routeParts); i++ {
+			if strings.HasPrefix(routeParts[i], "{") && strings.HasSuffix(routeParts[i], "}") {
+				parameters[routeParts[i][1:len(routeParts[i])-1]] = uriParts[i]
+				continue
+			}
+
+			if routeParts[i] == uriParts[i] {
+				continue
+			}
+
+			continue ROUTELOOP
+		}
+
+		request.Url.Parameters = parameters
+		conn.Write(route.Callback(request).Write(request))
+		return
+	}
+
+	response := HTTPResponse{
+		Code: StatusNotFound,
+	}
+
+	conn.Write(response.Write(request))
+}
+
+var tempDirectory string
+
 func main() {
-	fmt.Println("Logs from your program will appear here!")
-	// take inspiration from http.ReadRequest // readLine()
+	// TODO: - read request more cleanly, http.ReadRequest
+	// 		 - get rid of the routes array / and infinite for loop for the user and instead create HTTPListener struct ?
+
 	if len(os.Args) > 2 {
 		tempDirectory = os.Args[2]
 	}
@@ -187,72 +256,4 @@ func getFile(request HTTPRequest) HTTPResponse {
 		Headers: map[string]string{"Content-Type": "application/octet-stream"},
 		Body:    []byte(content),
 	}
-}
-
-func listenReq(conn net.Conn, routes []Route) {
-	rawReq := make([]byte, 4096)
-	conn.Read(rawReq)
-
-	defer conn.Close()
-
-	parts := strings.Split(string(rawReq), "\r\n\r\n")
-	metaParts := strings.Split(parts[0], "\r\n")
-	requestLineParts := strings.Split(metaParts[0], " ")
-
-	headers := make(map[string]string)
-	for i := 1; i < len(metaParts); i++ {
-		headerParts := strings.Split(metaParts[i], ": ")
-		if len(headerParts) >= 2 {
-			headers[headerParts[0]] = strings.Join(headerParts[1:], "")
-		}
-	}
-
-	contentLength, _ := strconv.Atoi(headers["Content-Length"])
-
-	request := HTTPRequest{
-		Url: URL{
-			Original: requestLineParts[1],
-		},
-		Headers: headers,
-		Method:  requestLineParts[0],
-		Body:    []byte(parts[1][:contentLength]),
-	}
-	uriParts := strings.Split(requestLineParts[1], "/")
-
-ROUTELOOP:
-	for _, route := range routes {
-		if requestLineParts[0] != route.Method {
-			continue
-		}
-
-		routeParts := strings.Split(route.Path, "/")
-
-		parameters := make(map[string]string)
-		if len(routeParts) != len(uriParts) {
-			continue
-		}
-
-		for i := 0; i < len(routeParts); i++ {
-			if strings.HasPrefix(routeParts[i], "{") && strings.HasSuffix(routeParts[i], "}") {
-				parameters[routeParts[i][1:len(routeParts[i])-1]] = uriParts[i]
-				continue
-			}
-
-			if routeParts[i] == uriParts[i] {
-				continue
-			}
-
-			continue ROUTELOOP
-		}
-
-		request.Url.Parameters = parameters
-		conn.Write(route.Callback(request).Write(request))
-		return
-	}
-
-	response := HTTPResponse{
-		Code: StatusNotFound,
-	}
-
-	conn.Write(response.Write(request))
 }
