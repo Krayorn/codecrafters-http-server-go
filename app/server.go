@@ -96,6 +96,14 @@ type Route struct {
 	Path     string
 }
 
+func addRoute(routes *[]Route, path string, callback func(HTTPRequest) HTTPResponse, method string) {
+	*routes = append(*routes, Route{
+		Callback: callback,
+		Method:   method,
+		Path:     path,
+	})
+}
+
 func main() {
 	fmt.Println("Logs from your program will appear here!")
 	// take inspiration from http.ReadRequest // readLine()
@@ -111,35 +119,11 @@ func main() {
 
 	routes := make([]Route, 0)
 
-	routes = append(routes, Route{
-		Callback: home,
-		Method:   "GET",
-		Path:     "/",
-	})
-
-	routes = append(routes, Route{
-		Callback: echo,
-		Method:   "GET",
-		Path:     "/echo/{str}",
-	})
-
-	routes = append(routes, Route{
-		Callback: userAgent,
-		Method:   "GET",
-		Path:     "/user-agent",
-	})
-
-	routes = append(routes, Route{
-		Callback: getFile,
-		Method:   "GET",
-		Path:     "/files/{filename}",
-	})
-
-	routes = append(routes, Route{
-		Callback: createFile,
-		Method:   "POST",
-		Path:     "/files/{filename}",
-	})
+	addRoute(&routes, "/", home, "GET")
+	addRoute(&routes, "/echo/{str}", echo, "GET")
+	addRoute(&routes, "/user-agent", userAgent, "GET")
+	addRoute(&routes, "/files/{filename}", getFile, "GET")
+	addRoute(&routes, "/files/{filename}", createFile, "POST")
 
 	for {
 		conn, err := l.Accept()
