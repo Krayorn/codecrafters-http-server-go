@@ -12,6 +12,9 @@ import (
 	"strings"
 )
 
+type Server struct {
+	Routes []Route
+}
 type HTTPRequest struct {
 	Headers map[string]string
 	Url     URL
@@ -94,8 +97,8 @@ type Route struct {
 	Path     string
 }
 
-func addRoute(routes *[]Route, path string, callback func(HTTPRequest) HTTPResponse, method string) {
-	*routes = append(*routes, Route{
+func (server *Server) addRoute(path string, callback func(HTTPRequest) HTTPResponse, method string) {
+	server.Routes = append(server.Routes, Route{
 		Callback: callback,
 		Method:   method,
 		Path:     path,
@@ -164,35 +167,23 @@ ROUTELOOP:
 	}
 
 	response := HTTPResponse{
-		Code: StatusNotFound,
+		Code:    StatusNotFound,
+		Headers: map[string]string{},
 	}
 
 	conn.Write(response.Write(request))
 }
 
-var tempDirectory string
+func newServer() Server {
+	return Server{Routes: make([]Route, 0)}
+}
 
-func main() {
-	// TODO: - read request more cleanly, http.ReadRequest
-	// 		 - get rid of the routes array / and infinite for loop for the user and instead create HTTPListener struct ?
-
-	if len(os.Args) > 2 {
-		tempDirectory = os.Args[2]
-	}
-
+func (server Server) start() {
 	l, err := net.Listen("tcp", "0.0.0.0:4221")
 	if err != nil {
 		fmt.Println("Failed to bind to port 4221")
 		os.Exit(1)
 	}
-
-	routes := make([]Route, 0)
-
-	addRoute(&routes, "/", home, "GET")
-	addRoute(&routes, "/echo/{str}", echo, "GET")
-	addRoute(&routes, "/user-agent", userAgent, "GET")
-	addRoute(&routes, "/files/{filename}", getFile, "GET")
-	addRoute(&routes, "/files/{filename}", createFile, "POST")
 
 	for {
 		conn, err := l.Accept()
@@ -201,9 +192,28 @@ func main() {
 			os.Exit(1)
 		}
 
-		go listenReq(conn, routes)
+		go listenReq(conn, server.Routes)
+	}
+}
+
+var tempDirectory string
+
+func main() {
+	// TODO: - read request more cleanly, http.ReadRequest
+
+	if len(os.Args) > 2 {
+		tempDirectory = os.Args[2]
 	}
 
+	router := newServer()
+
+	router.addRoute("/", home, "GET")
+	router.addRoute("/echo/{str}", echo, "GET")
+	router.addRoute("/user-agent", userAgent, "GET")
+	router.addRoute("/files/{filename}", getFile, "GET")
+	router.addRoute("/files/{filename}", createFile, "POST")
+
+	router.start()
 }
 
 func home(_ HTTPRequest) HTTPResponse {
