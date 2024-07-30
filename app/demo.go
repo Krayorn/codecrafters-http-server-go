@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/codecrafters-io/http-server-starter-go/app/client"
+	"github.com/codecrafters-io/http-server-starter-go/app/server"
 )
 
 var tempDirectory string
@@ -15,7 +15,7 @@ func main() {
 		tempDirectory = os.Args[2]
 	}
 
-	router := client.NewServer()
+	router := server.NewServer()
 
 	router.AddRoute("/", home, "GET")
 	router.AddRoute("/echo/{str}", echo, "GET")
@@ -26,53 +26,53 @@ func main() {
 	router.Start()
 }
 
-func home(_ client.HTTPRequest) client.HTTPResponse {
-	return client.HTTPResponse{
-		Code: client.StatusOK,
+func home(_ server.HTTPRequest) server.HTTPResponse {
+	return server.HTTPResponse{
+		Code: server.StatusOK,
 	}
 }
 
-func echo(request client.HTTPRequest) client.HTTPResponse {
+func echo(request server.HTTPRequest) server.HTTPResponse {
 	content := request.Url.Parameters["str"]
 
-	return client.HTTPResponse{
-		Code:    client.StatusOK,
+	return server.HTTPResponse{
+		Code:    server.StatusOK,
 		Headers: map[string]string{"Content-Type": "text/plain"},
 		Body:    []byte(content),
 	}
 }
 
-func userAgent(request client.HTTPRequest) client.HTTPResponse {
+func userAgent(request server.HTTPRequest) server.HTTPResponse {
 	content := request.Headers["User-Agent"]
 
-	return client.HTTPResponse{
-		Code:    client.StatusOK,
+	return server.HTTPResponse{
+		Code:    server.StatusOK,
 		Headers: map[string]string{"Content-Type": "text/plain"},
 		Body:    []byte(content),
 	}
 }
 
-func createFile(request client.HTTPRequest) client.HTTPResponse {
+func createFile(request server.HTTPRequest) server.HTTPResponse {
 	path := request.Url.Parameters["filename"]
 
 	os.WriteFile(fmt.Sprintf("/%s/%s", tempDirectory, path), request.Body, 0666)
-	return client.HTTPResponse{
-		Code: client.StatusCreated,
+	return server.HTTPResponse{
+		Code: server.StatusCreated,
 	}
 }
 
-func getFile(request client.HTTPRequest) client.HTTPResponse {
+func getFile(request server.HTTPRequest) server.HTTPResponse {
 	path := request.Url.Parameters["filename"]
 
 	if _, err := os.Stat(fmt.Sprintf("/%s/%s", tempDirectory, path)); errors.Is(err, os.ErrNotExist) {
-		return client.HTTPResponse{
-			Code: client.StatusNotFound,
+		return server.HTTPResponse{
+			Code: server.StatusNotFound,
 		}
 	}
 
 	content, _ := os.ReadFile(fmt.Sprintf("/%s/%s", tempDirectory, path))
-	return client.HTTPResponse{
-		Code:    client.StatusOK,
+	return server.HTTPResponse{
+		Code:    server.StatusOK,
 		Headers: map[string]string{"Content-Type": "application/octet-stream"},
 		Body:    []byte(content),
 	}

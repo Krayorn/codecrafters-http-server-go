@@ -1,4 +1,4 @@
-package client
+package server
 
 import (
 	"bytes"
@@ -14,6 +14,7 @@ import (
 type Server struct {
 	Routes []Route
 }
+
 type HTTPRequest struct {
 	Headers map[string]string
 	Url     URL
