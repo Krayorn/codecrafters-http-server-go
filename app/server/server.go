@@ -123,7 +123,11 @@ func ListenReq(conn net.Conn, routes []Route) {
 		}
 	}
 
-	contentLength, _ := strconv.Atoi(headers["Content-Length"])
+	contentLength, err := strconv.Atoi(headers["Content-Length"])
+	if err != nil {
+		fmt.Println("Could not convert content length to int, ignoring body")
+		contentLength = 0
+	}
 
 	request := HTTPRequest{
 		Url: URL{
