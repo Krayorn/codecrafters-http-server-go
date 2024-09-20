@@ -13,7 +13,8 @@ import (
 )
 
 type Server struct {
-	Routes []Route
+	Routes      []Route
+	Middlewares []func(Handler) Handler
 }
 
 type Header map[string][]string
@@ -135,6 +136,12 @@ func (server *Server) AddRoute(path string, callback func(HTTPRequest) HTTPRespo
 	})
 }
 
+type Handler func(request HTTPRequest) HTTPResponse
+
+func (server *Server) Use(middleware func(Handler) Handler) {
+	server.Middlewares = append(server.Middlewares, middleware)
+}
+
 func parseRequest(rawReq []byte) (*HTTPRequest, error) {
 	parts := strings.Split(string(rawReq), "\r\n\r\n")
 	metaParts := strings.Split(parts[0], "\r\n")
@@ -176,7 +183,7 @@ func parseRequest(rawReq []byte) (*HTTPRequest, error) {
 	}, nil
 }
 
-func listenReq(conn net.Conn, routes []Route) {
+func listenReq(conn net.Conn, routes []Route, middlewares []func(Handler) Handler) {
 	rawReq := make([]byte, 4096)
 	conn.Read(rawReq)
 
@@ -217,7 +224,14 @@ ROUTELOOP:
 
 		request.Url.Parameters = parameters
 
-		route.Callback(*request).Write(conn)
+		nextRequest := route.Callback
+		for i := len(middlewares) - 1; i >= 0; i-- {
+			nextRequest = middlewares[i](nextRequest)
+		}
+
+		err := nextRequest(*request).Write(conn)
+		fmt.Println("Error while writing the response", err)
+
 		return
 	}
 
@@ -248,6 +262,6 @@ func (server Server) Start() {
 			os.Exit(1)
 		}
 
-		go listenReq(conn, server.Routes)
+		go listenReq(conn, server.Routes, server.Middlewares)
 	}
 }

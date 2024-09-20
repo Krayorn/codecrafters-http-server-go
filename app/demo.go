@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/krayorn/http-server-starter-go/app/server"
 )
@@ -23,7 +24,31 @@ func main() {
 	router.AddRoute("/files/{filename}", getFile, "GET")
 	router.AddRoute("/files/{filename}", createFile, "POST")
 
+	router.Use(loggingMiddleware)
+	router.Use(timingMiddleware)
+
 	router.Start()
+}
+
+func loggingMiddleware(next server.Handler) server.Handler {
+	return func(req server.HTTPRequest) server.HTTPResponse {
+		fmt.Println("Receiving call on ", req.Url.Original)
+		resp := next(req)
+		fmt.Println("Received call on ", req.Url.Original)
+		return resp
+	}
+}
+
+func timingMiddleware(next server.Handler) server.Handler {
+	return func(req server.HTTPRequest) server.HTTPResponse {
+
+		start := time.Now()
+		resp := next(req)
+		duration := time.Since(start)
+		fmt.Printf("%s %s - %d (%v)\n", req.Method, req.Url.Original, resp.Code, duration)
+
+		return resp
+	}
 }
 
 func home(request server.HTTPRequest) server.HTTPResponse {
