@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"os"
@@ -68,12 +69,16 @@ type HTTPResponse struct {
 	Headers Header
 	Code    int
 	Body    []byte
+	Request *HTTPRequest
 }
 
-func (response HTTPResponse) Write(request HTTPRequest) []byte {
-	str := fmt.Sprintf("HTTP/1.1 %d %s\r\n", response.Code, StatusText(response.Code))
+func (response HTTPResponse) Write(w io.Writer) error {
 
-	if encodingsStr := request.Headers.Get("Accept-Encoding"); encodingsStr != "" {
+	if _, err := io.WriteString(w, fmt.Sprintf("HTTP/1.1 %d %s\r\n", response.Code, StatusText(response.Code))); err != nil {
+		return err
+	}
+
+	if encodingsStr := response.Request.Headers.Get("Accept-Encoding"); encodingsStr != "" {
 		encodings := strings.Split(encodingsStr, ", ")
 		for _, encoding := range encodings {
 			if encoding == "gzip" {
@@ -92,20 +97,28 @@ func (response HTTPResponse) Write(request HTTPRequest) []byte {
 	}
 
 	for header, value := range response.Headers {
-		str += fmt.Sprintf("%s: %s\r\n", header, value)
+		if _, err := io.WriteString(w, fmt.Sprintf("%s: %s\r\n", header, value)); err != nil {
+			return err
+		}
 	}
 
 	if len(response.Body) > 0 {
-		str += fmt.Sprintf("Content-Length: %d\r\n", len(response.Body))
+		if _, err := io.WriteString(w, fmt.Sprintf("Content-Length: %d\r\n", len(response.Body))); err != nil {
+			return err
+		}
 	}
 
-	str += "\r\n"
+	if _, err := io.WriteString(w, "\r\n"); err != nil {
+		return err
+	}
 
 	if len(response.Body) > 0 {
-		str += string(response.Body)
+		if _, err := io.WriteString(w, string(response.Body)); err != nil {
+			return err
+		}
 	}
 
-	return []byte(str)
+	return nil
 }
 
 type Route struct {
@@ -203,16 +216,18 @@ ROUTELOOP:
 		}
 
 		request.Url.Parameters = parameters
-		conn.Write(route.Callback(*request).Write(*request))
+
+		route.Callback(*request).Write(conn)
 		return
 	}
 
 	response := HTTPResponse{
 		Code:    StatusNotFound,
 		Headers: make(Header),
+		Request: request,
 	}
 
-	conn.Write(response.Write(*request))
+	response.Write(conn)
 }
 
 func NewServer() Server {

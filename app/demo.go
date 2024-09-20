@@ -26,9 +26,10 @@ func main() {
 	router.Start()
 }
 
-func home(_ server.HTTPRequest) server.HTTPResponse {
+func home(request server.HTTPRequest) server.HTTPResponse {
 	return server.HTTPResponse{
-		Code: server.StatusOK,
+		Code:    server.StatusOK,
+		Request: &request,
 	}
 }
 
@@ -41,6 +42,7 @@ func echo(request server.HTTPRequest) server.HTTPResponse {
 		Code:    server.StatusOK,
 		Headers: headers,
 		Body:    []byte(content),
+		Request: &request,
 	}
 }
 
@@ -53,6 +55,7 @@ func userAgent(request server.HTTPRequest) server.HTTPResponse {
 		Code:    server.StatusOK,
 		Headers: headers,
 		Body:    []byte(content),
+		Request: &request,
 	}
 }
 
@@ -61,7 +64,8 @@ func createFile(request server.HTTPRequest) server.HTTPResponse {
 
 	os.WriteFile(fmt.Sprintf("/%s/%s", tempDirectory, path), request.Body, 0666)
 	return server.HTTPResponse{
-		Code: server.StatusCreated,
+		Code:    server.StatusCreated,
+		Request: &request,
 	}
 }
 
@@ -81,5 +85,6 @@ func getFile(request server.HTTPRequest) server.HTTPResponse {
 		Code:    server.StatusOK,
 		Headers: headers,
 		Body:    []byte(content),
+		Request: &request,
 	}
 }
