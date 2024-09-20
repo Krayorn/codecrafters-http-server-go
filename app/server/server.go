@@ -15,8 +15,25 @@ type Server struct {
 	Routes []Route
 }
 
+type Header map[string][]string
+
+func (header Header) Get(key string) string {
+	if values, ok := header[strings.ToUpper(key)]; ok && len(values) > 0 {
+		return values[0]
+	}
+	return ""
+}
+
+func (header Header) Set(key string, value string) {
+	header[strings.ToUpper(key)] = []string{value}
+}
+
+func (header Header) Add(key string, value string) {
+	header[strings.ToUpper(key)] = append(header[strings.ToUpper(key)], value)
+}
+
 type HTTPRequest struct {
-	Headers map[string]string
+	Headers Header
 	Url     URL
 	Method  string
 	Body    []byte
@@ -48,7 +65,7 @@ func StatusText(code int) string {
 }
 
 type HTTPResponse struct {
-	Headers map[string]string
+	Headers Header
 	Code    int
 	Body    []byte
 }
@@ -56,7 +73,7 @@ type HTTPResponse struct {
 func (response HTTPResponse) Write(request HTTPRequest) []byte {
 	str := fmt.Sprintf("HTTP/1.1 %d %s\r\n", response.Code, StatusText(response.Code))
 
-	if encodingsStr, ok := request.Headers["Accept-Encoding"]; ok {
+	if encodingsStr := request.Headers.Get("Accept-Encoding"); encodingsStr != "" {
 		encodings := strings.Split(encodingsStr, ", ")
 		for _, encoding := range encodings {
 			if encoding == "gzip" {
@@ -67,7 +84,7 @@ func (response HTTPResponse) Write(request HTTPRequest) []byte {
 				}
 				gz.Close()
 
-				response.Headers["Content-Encoding"] = encoding
+				response.Headers.Set("Content-Encoding", encoding)
 				response.Body = encodedContent.Bytes()
 				break
 			}
@@ -105,43 +122,63 @@ func (server *Server) AddRoute(path string, callback func(HTTPRequest) HTTPRespo
 	})
 }
 
-func ListenReq(conn net.Conn, routes []Route) {
-	rawReq := make([]byte, 4096)
-	conn.Read(rawReq)
-
-	defer conn.Close()
-
+func parseRequest(rawReq []byte) (*HTTPRequest, error) {
 	parts := strings.Split(string(rawReq), "\r\n\r\n")
 	metaParts := strings.Split(parts[0], "\r\n")
 	requestLineParts := strings.Split(metaParts[0], " ")
 
-	headers := make(map[string]string)
+	if len(requestLineParts) < 2 {
+		return nil, fmt.Errorf("request line does not contain enough parts")
+	}
+
+	headers := make(Header)
 	for i := 1; i < len(metaParts); i++ {
 		headerParts := strings.Split(metaParts[i], ": ")
 		if len(headerParts) >= 2 {
-			headers[headerParts[0]] = strings.Join(headerParts[1:], "")
+			headerCanonical := strings.ToUpper(headerParts[0])
+			if _, ok := headers[headerCanonical]; !ok {
+				headers[headerCanonical] = make([]string, 0)
+			}
+			headers[headerCanonical] = append(headers[headerCanonical], strings.Join(headerParts[1:], ""))
 		}
 	}
 
-	contentLength, err := strconv.Atoi(headers["Content-Length"])
+	contentLength, err := strconv.Atoi(headers.Get("Content-Length"))
 	if err != nil {
-		fmt.Println("Could not convert content length to int, ignoring body")
 		contentLength = 0
 	}
 
-	request := HTTPRequest{
+	body := []byte{}
+	if len(parts) > 1 {
+		body = []byte(parts[1][:contentLength])
+	}
+
+	return &HTTPRequest{
 		Url: URL{
 			Original: requestLineParts[1],
 		},
 		Headers: headers,
 		Method:  requestLineParts[0],
-		Body:    []byte(parts[1][:contentLength]),
+		Body:    body,
+	}, nil
+}
+
+func listenReq(conn net.Conn, routes []Route) {
+	rawReq := make([]byte, 4096)
+	conn.Read(rawReq)
+
+	defer conn.Close()
+
+	request, err := parseRequest(rawReq)
+	if err != nil {
+		return
 	}
-	uriParts := strings.Split(requestLineParts[1], "/")
+
+	uriParts := strings.Split(request.Url.Original, "/")
 
 ROUTELOOP:
 	for _, route := range routes {
-		if requestLineParts[0] != route.Method {
+		if request.Method != route.Method {
 			continue
 		}
 
@@ -166,16 +203,16 @@ ROUTELOOP:
 		}
 
 		request.Url.Parameters = parameters
-		conn.Write(route.Callback(request).Write(request))
+		conn.Write(route.Callback(*request).Write(*request))
 		return
 	}
 
 	response := HTTPResponse{
 		Code:    StatusNotFound,
-		Headers: map[string]string{},
+		Headers: make(Header),
 	}
 
-	conn.Write(response.Write(request))
+	conn.Write(response.Write(*request))
 }
 
 func NewServer() Server {
@@ -196,6 +233,6 @@ func (server Server) Start() {
 			os.Exit(1)
 		}
 
-		go ListenReq(conn, server.Routes)
+		go listenReq(conn, server.Routes)
 	}
 }

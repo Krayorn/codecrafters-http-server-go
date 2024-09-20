@@ -35,19 +35,23 @@ func home(_ server.HTTPRequest) server.HTTPResponse {
 func echo(request server.HTTPRequest) server.HTTPResponse {
 	content := request.Url.Parameters["str"]
 
+	headers := make(server.Header)
+	headers.Set("Content-Type", "text/plain")
 	return server.HTTPResponse{
 		Code:    server.StatusOK,
-		Headers: map[string]string{"Content-Type": "text/plain"},
+		Headers: headers,
 		Body:    []byte(content),
 	}
 }
 
 func userAgent(request server.HTTPRequest) server.HTTPResponse {
-	content := request.Headers["User-Agent"]
+	content := request.Headers.Get("User-Agent")
 
+	headers := make(server.Header)
+	headers.Set("Content-Type", "text/plain")
 	return server.HTTPResponse{
 		Code:    server.StatusOK,
-		Headers: map[string]string{"Content-Type": "text/plain"},
+		Headers: headers,
 		Body:    []byte(content),
 	}
 }
@@ -71,9 +75,11 @@ func getFile(request server.HTTPRequest) server.HTTPResponse {
 	}
 
 	content, _ := os.ReadFile(fmt.Sprintf("/%s/%s", tempDirectory, path))
+	headers := make(server.Header)
+	headers.Set("Content-Type", "application/octet-stream")
 	return server.HTTPResponse{
 		Code:    server.StatusOK,
-		Headers: map[string]string{"Content-Type": "application/octet-stream"},
+		Headers: headers,
 		Body:    []byte(content),
 	}
 }
