@@ -184,8 +184,21 @@ func parseRequest(rawReq []byte) (*HTTPRequest, error) {
 }
 
 func listenReq(conn net.Conn, routes []Route, middlewares []func(Handler) Handler) {
-	rawReq := make([]byte, 4096)
-	conn.Read(rawReq)
+	rawReq := make([]byte, 0)
+	for {
+		// I think it's gonna hang if requestLength % 4096 == 0
+		// Need to either set a timeout, or start parsing the start of the array as I get content, to find the ContentLength header
+		buffer := make([]byte, 4096)
+		n, err := conn.Read(buffer)
+
+		if n > 0 {
+			rawReq = append(rawReq, buffer[:n]...)
+		}
+
+		if n < 4096 || err != nil {
+			break
+		}
+	}
 
 	defer conn.Close()
 
@@ -230,18 +243,28 @@ ROUTELOOP:
 		}
 
 		err := nextRequest(*request).Write(conn)
-		fmt.Println("Error while writing the response", err)
+		if err != nil {
+			fmt.Println("Error while writing the response", err)
+		}
 
 		return
 	}
 
-	response := HTTPResponse{
-		Code:    StatusNotFound,
-		Headers: make(Header),
-		Request: request,
+	nextRequest := func(req HTTPRequest) HTTPResponse {
+		return HTTPResponse{
+			Code:    StatusNotFound,
+			Headers: make(Header),
+			Request: &req,
+		}
+	}
+	for i := len(middlewares) - 2; i >= 0; i-- {
+		nextRequest = middlewares[i](nextRequest)
 	}
 
-	response.Write(conn)
+	err = nextRequest(*request).Write(conn)
+	if err != nil {
+		fmt.Println("Error while writing the response", err)
+	}
 }
 
 func NewServer() Server {
