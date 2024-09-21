@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/krayorn/http-server-starter-go/app/server"
@@ -60,6 +61,10 @@ func home(request server.HTTPRequest) server.HTTPResponse {
 
 func echo(request server.HTTPRequest) server.HTTPResponse {
 	content := request.Url.Parameters["str"]
+
+	if val, ok := request.Url.QueryParameters["repeat"]; ok && val == "true" {
+		content = strings.Repeat(content, 2)
+	}
 
 	headers := make(server.Header)
 	headers.Set("Content-Type", "text/plain")

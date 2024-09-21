@@ -42,8 +42,9 @@ type HTTPRequest struct {
 }
 
 type URL struct {
-	Original   string
-	Parameters map[string]string
+	Original        string
+	Parameters      map[string]string
+	QueryParameters map[string]string
 }
 
 const (
@@ -207,7 +208,13 @@ func listenReq(conn net.Conn, routes []Route, middlewares []func(Handler) Handle
 		return
 	}
 
-	uriParts := strings.Split(request.Url.Original, "/")
+	parts := strings.Split(request.Url.Original, "?")
+	uriParts := strings.Split(parts[0], "/")
+	queryParameters := make(map[string]string)
+	for _, parameter := range strings.Split(parts[1], "&") {
+		keyValue := strings.Split(parameter, "=")
+		queryParameters[keyValue[0]] = keyValue[1]
+	}
 
 ROUTELOOP:
 	for _, route := range routes {
@@ -236,6 +243,7 @@ ROUTELOOP:
 		}
 
 		request.Url.Parameters = parameters
+		request.Url.QueryParameters = queryParameters
 
 		nextRequest := route.Callback
 		for i := len(middlewares) - 1; i >= 0; i-- {
@@ -246,7 +254,6 @@ ROUTELOOP:
 		if err != nil {
 			fmt.Println("Error while writing the response", err)
 		}
-
 		return
 	}
 
