@@ -25,9 +25,11 @@ func main() {
 	router.AddRoute("/files/{filename}", getFile, "GET")
 	router.AddRoute("/files/{filename}", createFile, "POST")
 
-	router.Use(loggingMiddleware)
-	router.Use(timingMiddleware)
+	v2Router := router.SubRouter("/v2/{aa}")
+	v2Router.AddRoute("/echo/{str}", echo, "GET")
+	v2Router.Use(timingMiddleware)
 
+	router.Use(loggingMiddleware)
 	router.Start()
 }
 
@@ -42,12 +44,10 @@ func loggingMiddleware(next server.Handler) server.Handler {
 
 func timingMiddleware(next server.Handler) server.Handler {
 	return func(req server.HTTPRequest) server.HTTPResponse {
-
 		start := time.Now()
 		resp := next(req)
 		duration := time.Since(start)
 		fmt.Printf("%s %s - %d (%v)\n", req.Method, req.Url.Original, resp.Code, duration)
-
 		return resp
 	}
 }
@@ -61,7 +61,6 @@ func home(request server.HTTPRequest) server.HTTPResponse {
 
 func echo(request server.HTTPRequest) server.HTTPResponse {
 	content := request.Url.Parameters["str"]
-
 	if val, ok := request.Url.QueryParameters["repeat"]; ok && val == "true" {
 		content = strings.Repeat(content, 2)
 	}

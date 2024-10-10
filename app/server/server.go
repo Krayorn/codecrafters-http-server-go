@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"maps"
 	"net"
 	"os"
 	"strconv"
@@ -14,7 +15,19 @@ import (
 
 type Server struct {
 	Routes      []Route
+	SubRouters  []*Server
 	Middlewares []func(Handler) Handler
+	Prefix      string
+}
+
+func (server *Server) SubRouter(prefix string) *Server {
+	subRouter := Server{
+		Prefix: prefix,
+	}
+
+	server.SubRouters = append(server.SubRouters, &subRouter)
+
+	return &subRouter
 }
 
 type Header map[string][]string
@@ -184,7 +197,65 @@ func parseRequest(rawReq []byte) (*HTTPRequest, error) {
 	}, nil
 }
 
-func listenReq(conn net.Conn, routes []Route, middlewares []func(Handler) Handler) {
+func match(request HTTPRequest, uriParts []string, server Server) (func(HTTPRequest) HTTPResponse, map[string]string, []func(Handler) Handler) {
+ROUTELOOP:
+	for _, route := range server.Routes {
+		if request.Method != route.Method {
+			continue
+		}
+
+		routeParts := strings.Split(route.Path, "/")[1:]
+
+		parameters := make(map[string]string)
+		if len(routeParts) != len(uriParts) {
+			continue
+		}
+
+		for i := 0; i < len(routeParts); i++ {
+			if strings.HasPrefix(routeParts[i], "{") && strings.HasSuffix(routeParts[i], "}") {
+				parameters[routeParts[i][1:len(routeParts[i])-1]] = uriParts[i]
+				continue
+			}
+
+			if routeParts[i] == uriParts[i] {
+				continue
+			}
+
+			continue ROUTELOOP
+		}
+
+		return route.Callback, parameters, server.Middlewares
+	}
+
+SUBROUTERS:
+	for _, subrouter := range server.SubRouters {
+		prefixParts := strings.Split(subrouter.Prefix, "/")[1:]
+
+		parametersPrefix := make(map[string]string)
+		for i := 0; i < len(prefixParts); i++ {
+			if strings.HasPrefix(prefixParts[i], "{") && strings.HasSuffix(prefixParts[i], "}") {
+				parametersPrefix[prefixParts[i][1:len(prefixParts[i])-1]] = uriParts[i]
+				continue
+			}
+
+			if prefixParts[i] == uriParts[i] {
+				continue
+			}
+
+			continue SUBROUTERS
+		}
+
+		res, parameters, middlewares := match(request, uriParts[len(prefixParts):], *subrouter)
+		if res != nil {
+			maps.Copy(parametersPrefix, parameters)
+			return res, parametersPrefix, append(server.Middlewares, middlewares...)
+		}
+	}
+
+	return nil, map[string]string{}, server.Middlewares
+}
+
+func listenReq(conn net.Conn, server Server) {
 	rawReq := make([]byte, 0)
 	for {
 		// I think it's gonna hang if requestLength % 4096 == 0
@@ -209,48 +280,25 @@ func listenReq(conn net.Conn, routes []Route, middlewares []func(Handler) Handle
 	}
 
 	parts := strings.Split(request.Url.Original, "?")
-	uriParts := strings.Split(parts[0], "/")
+	uriParts := strings.Split(parts[0], "/")[1:]
 	queryParameters := make(map[string]string)
 	for _, parameter := range strings.Split(parts[1], "&") {
 		keyValue := strings.Split(parameter, "=")
 		queryParameters[keyValue[0]] = keyValue[1]
 	}
 
-ROUTELOOP:
-	for _, route := range routes {
-		if request.Method != route.Method {
-			continue
-		}
+	callback, parameters, middlewares := match(*request, uriParts, server)
 
-		routeParts := strings.Split(route.Path, "/")
-
-		parameters := make(map[string]string)
-		if len(routeParts) != len(uriParts) {
-			continue
-		}
-
-		for i := 0; i < len(routeParts); i++ {
-			if strings.HasPrefix(routeParts[i], "{") && strings.HasSuffix(routeParts[i], "}") {
-				parameters[routeParts[i][1:len(routeParts[i])-1]] = uriParts[i]
-				continue
-			}
-
-			if routeParts[i] == uriParts[i] {
-				continue
-			}
-
-			continue ROUTELOOP
-		}
-
+	if callback != nil {
 		request.Url.Parameters = parameters
 		request.Url.QueryParameters = queryParameters
 
-		nextRequest := route.Callback
+		nextRequest := callback
 		for i := len(middlewares) - 1; i >= 0; i-- {
 			nextRequest = middlewares[i](nextRequest)
 		}
 
-		err := nextRequest(*request).Write(conn)
+		err = nextRequest(*request).Write(conn)
 		if err != nil {
 			fmt.Println("Error while writing the response", err)
 		}
@@ -292,6 +340,6 @@ func (server Server) Start() {
 			os.Exit(1)
 		}
 
-		go listenReq(conn, server.Routes, server.Middlewares)
+		go listenReq(conn, server)
 	}
 }
