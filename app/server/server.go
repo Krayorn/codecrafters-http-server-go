@@ -11,6 +11,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type Server struct {
@@ -256,13 +257,12 @@ SUBROUTERS:
 }
 
 func listenReq(conn net.Conn, server Server) {
+	conn.SetReadDeadline(time.Now().Add(10 * time.Millisecond)) // ensure the connection is not hanging waiting for data for no reason
+
 	rawReq := make([]byte, 0)
 	for {
-		// I think it's gonna hang if requestLength % 4096 == 0
-		// Need to either set a timeout, or start parsing the start of the array as I get content, to find the ContentLength header
 		buffer := make([]byte, 4096)
 		n, err := conn.Read(buffer)
-
 		if n > 0 {
 			rawReq = append(rawReq, buffer[:n]...)
 		}
