@@ -266,7 +266,6 @@ func listenReq(conn net.Conn, server Server) {
 		if n > 0 {
 			rawReq = append(rawReq, buffer[:n]...)
 		}
-
 		if n < 4096 || err != nil {
 			break
 		}
@@ -282,9 +281,15 @@ func listenReq(conn net.Conn, server Server) {
 	parts := strings.Split(request.Url.Original, "?")
 	uriParts := strings.Split(parts[0], "/")[1:]
 	queryParameters := make(map[string]string)
-	for _, parameter := range strings.Split(parts[1], "&") {
-		keyValue := strings.Split(parameter, "=")
-		queryParameters[keyValue[0]] = keyValue[1]
+	if len(parts) > 1 {
+		for _, parameter := range strings.Split(parts[1], "&") {
+			keyValue := strings.Split(parameter, "=")
+			if len(keyValue) > 1 {
+				queryParameters[keyValue[0]] = keyValue[1]
+			} else {
+				queryParameters[keyValue[0]] = "true"
+			}
+		}
 	}
 
 	callback, parameters, middlewares := match(*request, uriParts, server)
