@@ -278,11 +278,11 @@ func listenReq(conn net.Conn, server Server) {
 		return
 	}
 
-	parts := strings.Split(request.Url.Original, "?")
-	uriParts := strings.Split(parts[0], "/")[1:]
+	uri, queryParamString, found := strings.Cut(request.Url.Original, "?")
+	uriParts := strings.Split(uri, "/")[1:]
 	queryParameters := make(map[string]string)
-	if len(parts) > 1 {
-		for _, parameter := range strings.Split(parts[1], "&") {
+	if found {
+		for _, parameter := range strings.Split(queryParamString, "&") {
 			keyValue := strings.Split(parameter, "=")
 			if len(keyValue) > 1 {
 				queryParameters[keyValue[0]] = keyValue[1]
